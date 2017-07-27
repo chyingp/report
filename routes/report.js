@@ -16,8 +16,12 @@ var LOG_FILE_NAME_PAGE_SPEED = 'page-speed.log';
 var LOG_FILE_NAME_PAGE_VIEW = 'page-view.log';
 var LOG_FILE_NAME_DEFAULT = 'default.log';
 
+/**
+ * 根据上报类型，创建不同的logger
+ * @param {string} type 上报类型，可选的值为 ...
+ * @return {Logger} bunyan logger
+ */
 var createLogger = function (type) {
-    // var type = item.type;
     var filename;
     switch(type) {
         case TYPE_CGI_SPEED: filename = LOG_FILE_NAME_CGI_SPEED; break;
@@ -39,11 +43,17 @@ var createLogger = function (type) {
     return logger;
 };
 
+// 预先初始化logger
 var pageViewLogger = createLogger(TYPE_PAGE_VIEW);
 var pageSpeedLogger = createLogger(TYPE_PAGE_SPEED);
 var cgiSpeedLogger = createLogger(TYPE_CGI_SPEED);
 var defaultLogger = createLogger(TYPE_DEFAULT);
 
+/**
+ * 根据上报类型，创建不同的logger
+ * @param {string} type 上报类型，可选的值为 ...
+ * @return {Logger} bunyan logger
+ */
 var getLogger = function (type) {
     var logger;
     switch(type) {
@@ -55,22 +65,20 @@ var getLogger = function (type) {
     return logger;
 };
 
-// 日志输出配置
-// var logger = bunyan.createLogger({
-//     name: "myapp",
-//     streams: [{
-//         type: 'rotating-file',
-//         path: path.join(__dirname, '../logs/speed-report.log'),
-//         period: '1d',   // daily rotation
-//         count: 3        // keep 3 back copies
-//     }]
-// });
-
 // TODO 上报过滤器 - P0
-var filters = {
-    'page_view': {},
-    'cgi_speed': {},
-    'page_speed': {}
+var filterMap = {
+    [TYPE_PAGE_VIEW]: {
+        requiredKeys: ['proj_id', 'type', 'url', 'uid']
+    },
+    [TYPE_PAGE_SPEED]: {
+        requiredKeys: ['proj_id', 'type', 'url', 'sid', 'cost']
+    },
+    [TYPE_CGI_SPEED]: {
+        requiredKeys: ['proj_id', 'type', 'url',  'cost', 'error_code']         
+    },
+    [TYPE_DEFAULT]: {
+        requiredKeys: ['proj_id', 'type']
+    }
 };
 
 // TODO 过滤无效的请求（比如恶意请求？）- P1
@@ -91,12 +99,28 @@ var fmDate = function (date) {
 
 var addReportRouter = function (req, res, next) {
     var opt = req.method === 'GET' ? req.query : req.body;
+
+    var type = opt.type;
+    var loggerFilter = filterMap[type] || filterMap[TYPE_DEFAULT];
+    var missingKeys = loggerFilter.requiredKeys.filter(function (key) {
+        return typeof opt[key] === 'undefined' || opt[key] === '';
+    });
+
+    // 缺少必选字段
+    if(missingKeys.length !== 0) {
+        res.json({
+            ret_code: '10000', 
+            ret_msg: '缺少必要字段 ' + missingKeys.join(',')
+        });
+        return;
+    }
+
     opt.time = fmDate(new Date());
 
     var logger = getLogger(opt.type);
     logger.info(opt);
 
-    res.end('ok');    
+    res.json({ret_code: '0', ret_msg: 'ok'});    
 };
 
 router.get('/add', addReportRouter);
